@@ -1,0 +1,18 @@
+/* Full-screen overlay with loading indicator styles */
+#loading-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw; /* Use viewport width to cover the entire screen */
+    height: 100vh; /* Use viewport height to cover the entire screen */
+    background-color: rgba(255, 255, 255, 0.4); /* White background with 80% transparency */
+    z-index: 1000; /* Ensure the overlay is on top of other elements */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.loading {
+    text-align: center;
+}

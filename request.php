@@ -46,7 +46,7 @@ abstract class ModelBase
         }
     }
 
-    public static function getWhere(string $conditions = ''): Collection
+    public static function getWhere(?string $conditions = ''): Collection
     {
         $db = Database::getClient();
 
@@ -96,6 +96,16 @@ abstract class ModelBase
         return $db->delete($model->_table, 'id', $id);
     }
 
+    public static function create($data): self
+    {
+        $db = Database::getClient();
+
+        $class = static::class;
+        $model = new $class([]);
+        $db->insert($model->_table, $data);
+        return $model::getOne($db->getLastInsertId());
+    }
+
     /**
      * @param $id
      * @return ModelBase|null
@@ -116,16 +126,15 @@ abstract class ModelBase
         return null;
     }
 
-    public static function create($data): self
-    {
-        $class = static::class;
-        return new $class();
-    }
-
     public static function update($data): self
     {
+        $db = Database::getClient();
+
         $class = static::class;
-        return new $class();
+        $model = new $class([]);
+        $db->update($model->_table, $data, 'id', $data['id']);
+
+        return new $class($data);
     }
 }
 
@@ -180,10 +189,10 @@ class RequestItemModel extends ModelBase implements IModel
 
 class RequestModel extends ModelBase implements IModel
 {
-    public int $id;
-    public string $requested_by;
-    public string $requested_on;
-    public string $ordered_on;
+    public ?int $id = null;
+    public ?string $requested_by = null;
+    public ?string $requested_on = null;
+    public ?string $ordered_on = null;
     public string $_table = 'requests';
 
     public static function factory(): self
@@ -221,8 +230,13 @@ class RequestModel extends ModelBase implements IModel
             /** @var RequestItemModel $row */
             $idsAux[] = $row->item_id;
         }
-        $ids = implode(',', $idsAux);
-        return ItemModel::getWhere("id IN ($ids)");
+        $condition = null;
+        if (count($idsAux)) {
+            $ids = implode(',', $idsAux);
+            $condition = " id in ($ids)";
+        }
+
+        return ItemModel::getWhere($condition);
     }
 }
 
@@ -374,6 +388,7 @@ class RequestHandler
         } elseif ($this->isPut()) {
             $body = $this->getBody();
             $model = $modelClass::update($body);
+//            dd($model);
             return $response->renderSuccess($model->toArray());
         } elseif ($this->isDelete()) {
             $id = $this->getBodyValue('id');
@@ -411,11 +426,10 @@ class RequestHandler
             case 'GET':
                 return $_GET;
             case 'POST':
-                return $_POST;
             case 'PUT':
-                $_PUT = [];
-                parse_str(file_get_contents('php://input'), $_PUT);
-                return $_PUT;
+                // Parse data from json content request
+                parse_str(file_get_contents('php://input'), $data);
+                return json_decode(array_keys($data)[0], true, 512, JSON_THROW_ON_ERROR);
             case 'DELETE':
             default:
                 return [];
@@ -567,12 +581,16 @@ class Database
         return $sel;
     }
 
-    public function fetchQuery(string $table, string $conditions)
+    public function fetchQuery(string $table, string $conditions = null)
     {
         /**
          * This is not escaped for development speed purposes
          */
-        $sel = $this->pdo->query("SELECT * FROM $table WHERE $conditions");
+        $where = '';
+        if ($conditions) {
+            $where = " WHERE $conditions";
+        }
+        $sel = $this->pdo->query("SELECT * FROM $table $where");
         $sel->setFetchMode(PDO::FETCH_ASSOC);
         return $sel;
     }
@@ -698,7 +716,9 @@ try {
      */
     (new Response())->renderError('Database server error', 500, [
         'route' => $requestHandler->getRoute(),
+        'error' => $e->getMessage(),
     ]);
+    dd($e);
 } catch (Exception $e) {
     $requestHandler = new RequestHandler();
     /** @noinspection PhpUnhandledExceptionInspection
