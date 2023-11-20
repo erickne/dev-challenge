@@ -1,5 +1,5 @@
 // Define globals
-const API_HOST = 'http://localhost/request.php'
+const API_HOST = 'http://localhost/api.php'
 let deleteItemId
 let requestsTable
 let summaryTable
@@ -19,6 +19,7 @@ function toggleEditForm (id) {
 
     $('#editRequestedBy').val('')
     $('#editRequestId').val('')
+    $('#itemType').val('')
     // Add a new item
     addEditRequestItem()
     return
@@ -80,20 +81,19 @@ function showDeleteConfirmationModal (id) {
   $('#confirmationModal').modal('show')
 }
 
-function addEditRequestItem (value) {
+function addEditRequestItem (selectedValue) {
   const newItemField = `
     <div class="input-group mb-2 editRequestItemsInputGroup">
       <select class="form-control editRequestItems" name="editRequestItems[]" required>
       </select>
       <div class="input-group-append">
         <button class="btn btn-outline-secondary" type="button" onclick="removeEditRequestItem(this)">
-                            <i class="fas fa-trash"></i>
-        Remove</button>
+            <i class="fas fa-trash"></i>Remove</button>
       </div>
     </div>
   `
   $('#editRequestItemsGroup').append(newItemField)
-  fetchOptionsForSelect($('.editRequestItems').last(), value) // Pass the last select element
+  fetchOptionsForSelect($('.editRequestItems').last(), selectedValue) // Pass the last select element
 
 }
 
@@ -120,8 +120,12 @@ function fetchOptionsForSelect (selectElement, selectedValue) {
 
       // Dynamically populate options for all select fields
       $(selectElement).empty()
+      // $(selectElement).append(`<option value="" ${!!selectedValue ? 'selected' : ''} data-item-type-id=""></option>`)
+      options.sort((a, b) => b.item_type_id - a.item_type_id) // b - a for reverse sort
+
       options.forEach(function (item) {
-        $(selectElement).append(`<option value="${item.id}" ${item.id === selectedValue ? 'selected' : ''} data-item-type-id="${item.item_type_id}">${item.name}</option>`)
+        const optName = `${item.item_type.name} >> ${item.name}`
+        $(selectElement).append(`<option value="${item.id}" ${item.id === selectedValue ? 'selected' : ''} data-item-type-id="${item.item_type_id}">${optName}</option>`)
       })
     },
     error: function (error) {

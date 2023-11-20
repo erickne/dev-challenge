@@ -1,0 +1,79 @@
+-- --------------------------------------------------------
+-- Servidor:                     127.0.0.1
+-- Versão do servidor:           8.0.31 - MySQL Community Server - GPL
+-- OS do Servidor:               Win64
+-- HeidiSQL Versão:              12.6.0.6765
+-- --------------------------------------------------------
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET NAMES utf8 */;
+/*!50503 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+
+-- Copiando estrutura para tabela db_cisco.items
+CREATE TABLE IF NOT EXISTS `items` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  `item_type_id` int DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `FK_items_item_types` (`item_type_id`),
+  CONSTRAINT `FK_items_item_types` FOREIGN KEY (`item_type_id`) REFERENCES `item_types` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=latin1;
+
+-- Exportação de dados foi desmarcado.
+
+-- Copiando estrutura para tabela db_cisco.item_types
+CREATE TABLE IF NOT EXISTS `item_types` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=latin1;
+
+-- Exportação de dados foi desmarcado.
+
+-- Copiando estrutura para tabela db_cisco.requests
+CREATE TABLE IF NOT EXISTS `requests` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `requested_by` varchar(255) DEFAULT NULL,
+  `requested_on` datetime DEFAULT NULL,
+  `ordered_on` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=37 DEFAULT CHARSET=latin1;
+
+-- Exportação de dados foi desmarcado.
+
+-- Copiando estrutura para tabela db_cisco.request_items
+CREATE TABLE IF NOT EXISTS `request_items` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `request_id` int NOT NULL,
+  `item_id` int NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `FK__requests` (`request_id`),
+  KEY `FK__items` (`item_id`),
+  CONSTRAINT `FK__items` FOREIGN KEY (`item_id`) REFERENCES `items` (`id`),
+  CONSTRAINT `FK__requests` FOREIGN KEY (`request_id`) REFERENCES `requests` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=89 DEFAULT CHARSET=latin1;
+
+-- Exportação de dados foi desmarcado.
+
+-- Copiando estrutura para tabela db_cisco.summary
+CREATE TABLE IF NOT EXISTS `summary` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `requested_by` varchar(255) DEFAULT NULL,
+  `ordered_on` datetime DEFAULT NULL,
+  `items` text,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `requested_by` (`requested_by`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=latin1;
+
+-- Exportação de dados foi desmarcado.
+
+/*!40103 SET TIME_ZONE=IFNULL(@OLD_TIME_ZONE, 'system') */;
+/*!40101 SET SQL_MODE=IFNULL(@OLD_SQL_MODE, '') */;
+/*!40014 SET FOREIGN_KEY_CHECKS=IFNULL(@OLD_FOREIGN_KEY_CHECKS, 1) */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40111 SET SQL_NOTES=IFNULL(@OLD_SQL_NOTES, 1) */;

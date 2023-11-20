@@ -15,9 +15,13 @@ const DB_HOST = 'localhost';
 const DB_USER = 'root';
 const DB_PASSWORD = 'mysql';
 const DB_PORT = 3306;
-const DB_NAME = 'db_cisco';
+const DB_NAME = 'db_app';
 
-
+/**
+ * Used for debugging purposes to quickly inspect the values of variables.
+ * @param ...$args
+ * @return void
+ */
 function dd(...$args)
 {
     print_r($args);
@@ -236,6 +240,14 @@ class RequestModel extends ModelBase implements IModel
         ];
     }
 
+    /**
+     * This code defines a public function called items() that returns a Collection of items.
+     * It retrieves a collection of RequestItemModel objects based on a specific condition. Then, it extracts the item_id from each RequestItemModel object and adds it to an array called $idsAux.
+     * If the $idsAux array is not empty, it creates a comma-separated string of the values in the array and uses it as a condition in a database query to retrieve a collection of ItemModel objects.
+     * Finally, if the $idsAux array is empty, it returns an empty Collection object.
+     *
+     * @return Collection
+     */
     public function items(): Collection
     {
         $requestItems = RequestItemModel::getWhere("request_id = $this->id");
@@ -252,9 +264,20 @@ class RequestModel extends ModelBase implements IModel
         return new Collection([]);
     }
 
+    /**
+     * RequestModel Update
+     * It takes an array of data as input and returns an instance of the class it belongs to.
+     * The method first calls the parent class's update method with specific fields from the input data. It then deletes existing items associated with the record and creates new items based on the items field in the input data.
+     * Finally, it syncs a summary model based on the requested_by field in the input data and returns the updated record.
+     *
+     * @param array $data
+     * @return self
+     * @throws JsonException
+     */
     public static function update(array $data): self
     {
         /** @var RequestModel $newModel */
+        // Update the request data
         $newModel = parent::update([
             'id' => $data['id'] ?? null,
             'requested_by' => $data['requested_by'] ?? null,
@@ -262,8 +285,10 @@ class RequestModel extends ModelBase implements IModel
             'ordered_on' => $data['ordered_on'] ?? null,
         ]);
 
+        // Delete the existing items
         self::deleteItems($data['id']);
 
+        // Create new request items
         if (array_key_exists('items', $data)) {
             foreach ($data['items'] as $item) {
                 RequestItemModel::create([
@@ -271,12 +296,20 @@ class RequestModel extends ModelBase implements IModel
                     'item_id' => $item['id'],
                 ]);
             }
+
+            // Sync the summary model
             SummaryModel::syncRequest($data['requested_by']);
         }
 
         return $newModel;
     }
 
+    /**
+     * Delete items from RequestModel
+     *
+     * @param $request_id
+     * @return void
+     */
     private static function deleteItems($request_id): void
     {
         $db = Database::getClient();
@@ -285,6 +318,14 @@ class RequestModel extends ModelBase implements IModel
         $db->delete($model->_table, 'request_id', $request_id);
     }
 
+    /**
+     *
+     * Delete RequestModel and related items. Also, sync SummaryModel.
+     *
+     * @param $id
+     * @return bool
+     * @throws JsonException
+     */
     public static function delete($id): bool
     {
         /** @var RequestModel $request */
@@ -298,13 +339,20 @@ class RequestModel extends ModelBase implements IModel
         return parent::delete($id);
     }
 
+    /**
+     * Creates a new instance of the class with the given data and sync SummaryModel
+     *
+     * @param array $data The data to create the instance with.
+     * @return self The newly created instance.
+     * @throws JsonException
+     */
     public static function create(array $data): self
     {
         /** @var RequestModel $newModel */
         $newModel = parent::create([
             'id' => $data['id'] ?? null,
             'requested_by' => $data['requested_by'] ?? null,
-            'requested_on' => (new \DateTime())->format('Y-m-d H:i:s'),
+            'requested_on' => (new DateTime())->format('Y-m-d H:i:s'),
             'ordered_on' => $data['ordered_on'] ?? null,
         ]);
 
@@ -348,28 +396,43 @@ class SummaryModel extends ModelBase implements IModel
         return new self();
     }
 
-    /** @noinspection UnknownInspectionInspection */
+    /**
+     * Synchronize the summary model with related RequestModel and Request Items
+     * based on requested_by user
+     *
+     * @param string|null $requested_by
+     * @return void
+     * @throws JsonException
+     */
     public static function syncRequest(string $requested_by = null): void
     {
+        // If requested_by is not provided, return early
         if (!$requested_by) {
             return;
         }
+
         /** @var SummaryModel $summary */
+        // If requested_by is not provided, return early
         $summaryQuery = self::getWhere("requested_by = '$requested_by'");
 
+        // If a summary model exists, use it
         if (count($summaryQuery->items)) {
             $summary = $summaryQuery->items[0];
         } else {
+            // Otherwise, create a new summary model
             $summary = self::create([
                 'requested_by' => $requested_by,
-                'ordered_on' => (new \DateTime())->format('Y-m-d H:i:s'),
+                'ordered_on' => (new DateTime())->format('Y-m-d H:i:s'),
             ]);
         }
 
+        // Get the IDs of the requests made by the requested_by user
         $requestsIDs = RequestModel::getWhere("requested_by = '$requested_by'")->getIDs();
 
+        // Get the request items related to the requests
         $requestItems = RequestItemModel::getWhere('request_id IN (' . implode(',', $requestsIDs) . ')')->items;
 
+        // If no request items exist, delete the summary model and return
         if (!count($requestItems)) {
             self::delete($summary->id);
             return;
@@ -381,18 +444,26 @@ class SummaryModel extends ModelBase implements IModel
             $itemsIDs[] = $requestItem->item_id;
         }
 
+        // Get the items based on the item IDs
         $items = ItemModel::getWhere('id in (' . implode(',', $itemsIDs) . ')');
         $itemTypesAux = [];
+        $itemsIdsSkipDuplicates = [];
+
+        // Group the items by their item_type_id and remove duplicates
         foreach ($items->items as $item) {
             /** @var ItemModel $item */
-            $itemTypesAux[$item->item_type_id][] = $item->id;
+
+            if (!in_array($item->id, $itemsIdsSkipDuplicates, true)) {
+                $itemsIdsSkipDuplicates[] = $itemsIdsSkipDuplicates;
+                $itemTypesAux[$item->item_type_id][] = $item->id;
+            }
         }
 
-        /** @noinspection PhpIncompatibleReturnTypeInspection */
+        // Update the summary model with the item types
         self::update([
             'id' => $summary->id,
             'requested_by' => $summary->requested_by,
-            'ordered_on' => $summary->ordered_on,
+            'ordered_on' => (new DateTime())->format('Y-m-d H:i:s'),
             'items' => json_encode($itemTypesAux, JSON_THROW_ON_ERROR)
         ]);
     }
@@ -416,7 +487,7 @@ class SummaryModel extends ModelBase implements IModel
         $return = [];
         foreach ($items as $itemTypeId => $itemsIds) {
             $return[] = [
-                'item_type' => ItemType::getWhere('id = ' . $itemTypeId)->items[0]->toArray(),
+                'item_type' => ItemTypeModel::getWhere('id = ' . $itemTypeId)->items[0]->toArray(),
                 'items' => ItemModel::getWhere('id in (' . implode(',', $itemsIds) . ')')->toArray(),
             ];
         }
@@ -434,7 +505,7 @@ class ItemModel extends ModelBase implements IModel
 
     public static function factory(): self
     {
-        $item_type = ItemType::factory();
+        $item_type = ItemTypeModel::factory();
         $class = static::class;
         return new $class([
             'id' => 1,
@@ -455,15 +526,15 @@ class ItemModel extends ModelBase implements IModel
         ];
     }
 
-    public function itemType(): ?ItemType
+    public function itemType(): ?ItemTypeModel
     {
         /** @noinspection UnknownInspectionInspection */
         /** @noinspection PhpIncompatibleReturnTypeInspection */
-        return ItemType::getOne($this->item_type_id);
+        return ItemTypeModel::getOne($this->item_type_id);
     }
 }
 
-class ItemType extends ModelBase implements IModel
+class ItemTypeModel extends ModelBase implements IModel
 {
     public int $id;
     public string $name;
@@ -871,6 +942,9 @@ class Database
 }
 
 try {
+    /**
+     * Mapping of models and API prefix URLs
+     */
     $requestHandler = new RequestHandler([
         'requests' => RequestModel::class,
         'items' => ItemModel::class,
@@ -907,6 +981,7 @@ try {
         'dump' => $e
     ]);
 //    dd($e);
+
 } catch (Exception $e) {
     $requestHandler = new RequestHandler();
     /** @noinspection PhpUnhandledExceptionInspection
@@ -917,4 +992,5 @@ try {
         'dump' => $e
     ]);
 //    dd($e);
+
 }
