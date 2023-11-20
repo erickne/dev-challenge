@@ -1,10 +1,22 @@
 <?php
 
-/** @noinspection PhpUnhandledExceptionInspection */
+/** @noinspection PhpUnhandledExceptionInspection
+ * @noinspection UnknownInspectionInspection
+ */
 
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
 ini_set('display_errors', 'On');
+
+/**
+ * Environment variables
+ */
+const DB_HOST = 'localhost';
+const DB_USER = 'root';
+const DB_PASSWORD = 'mysql';
+const DB_PORT = 3306;
+const DB_NAME = 'db_cisco';
+
 
 function dd(...$args)
 {
@@ -62,13 +74,13 @@ abstract class ModelBase
         return new Collection($return);
     }
 
-    public static function getAll($query = '', $limit = 10, $page = 1): Collection
+    public static function getAll($query = ''): Collection
     {
         $db = Database::getClient();
 
         $class = static::class;
         $model = new $class([]);
-        $rows = $db->fetchAll($model->_table);
+        $rows = $db->fetchQuery($model->_table, $query);
         $return = [];
         if ($rows) {
             foreach ($rows as $row) {
@@ -76,12 +88,6 @@ abstract class ModelBase
             }
         }
         return new Collection($return);
-
-//        return new Collection([
-//            $cl::factory(),
-//            $cl::factory()
-//        ]);
-
     }
 
     public static function delete($id): bool
@@ -96,7 +102,7 @@ abstract class ModelBase
         return $db->delete($model->_table, 'id', $id);
     }
 
-    public static function create($data): self
+    public static function create(array $data): self
     {
         $db = Database::getClient();
 
@@ -126,7 +132,7 @@ abstract class ModelBase
         return null;
     }
 
-    public static function update($data): self
+    public static function update(array $data): self
     {
         $db = Database::getClient();
 
@@ -159,6 +165,14 @@ class Collection
         return $array;
     }
 
+    public function getIDs(): array
+    {
+        $ids = [];
+        foreach ($this->items as $item) {
+            $ids[] = $item->id;
+        }
+        return $ids;
+    }
 }
 
 class RequestItemModel extends ModelBase implements IModel
@@ -230,13 +244,184 @@ class RequestModel extends ModelBase implements IModel
             /** @var RequestItemModel $row */
             $idsAux[] = $row->item_id;
         }
-        $condition = null;
         if (count($idsAux)) {
             $ids = implode(',', $idsAux);
             $condition = " id in ($ids)";
+            return ItemModel::getWhere($condition);
+        }
+        return new Collection([]);
+    }
+
+    public static function update(array $data): self
+    {
+        /** @var RequestModel $newModel */
+        $newModel = parent::update([
+            'id' => $data['id'] ?? null,
+            'requested_by' => $data['requested_by'] ?? null,
+            'requested_on' => $data['requested_on'] ?? null,
+            'ordered_on' => $data['ordered_on'] ?? null,
+        ]);
+
+        self::deleteItems($data['id']);
+
+        if (array_key_exists('items', $data)) {
+            foreach ($data['items'] as $item) {
+                RequestItemModel::create([
+                    'request_id' => $newModel->id,
+                    'item_id' => $item['id'],
+                ]);
+            }
+            SummaryModel::syncRequest($data['requested_by']);
         }
 
-        return ItemModel::getWhere($condition);
+        return $newModel;
+    }
+
+    private static function deleteItems($request_id): void
+    {
+        $db = Database::getClient();
+        $class = RequestItemModel::class;
+        $model = new $class([]);
+        $db->delete($model->_table, 'request_id', $request_id);
+    }
+
+    public static function delete($id): bool
+    {
+        /** @var RequestModel $request */
+        $request = self::getOne($id);
+        if (!$request) {
+            return true;
+        }
+
+        self::deleteItems($id);
+        SummaryModel::syncRequest($request->requested_by);
+        return parent::delete($id);
+    }
+
+    public static function create(array $data): self
+    {
+        /** @var RequestModel $newModel */
+        $newModel = parent::create([
+            'id' => $data['id'] ?? null,
+            'requested_by' => $data['requested_by'] ?? null,
+            'requested_on' => (new \DateTime())->format('Y-m-d H:i:s'),
+            'ordered_on' => $data['ordered_on'] ?? null,
+        ]);
+
+        if (array_key_exists('items', $data)) {
+            foreach ($data['items'] as $item) {
+                RequestItemModel::create([
+                    'request_id' => $newModel->id,
+                    'item_id' => $item['id'],
+                ]);
+            }
+        }
+
+        SummaryModel::syncRequest($newModel->requested_by);
+
+        return $newModel;
+    }
+}
+
+class SummaryModel extends ModelBase implements IModel
+{
+    public ?int $id = null;
+    public ?string $requested_by = null;
+    public ?string $ordered_on = null;
+    public ?string $items = null;
+    public string $_table = 'summary';
+
+    public static function factory(): self
+    {
+//        $items = new Collection([
+//            ItemModel::factory(),
+//            ItemModel::factory(),
+//            ItemModel::factory(),
+//        ]);
+//        return new self([
+//            'id' => 1,
+//            'requested_by' => 'Paper',
+//            'requested_on' => '2023-11-21 14:40:00',
+//            'ordered_on' => '2023-11-22 11:20:00',
+//            'items' => $items->toArray(),
+//        ]);
+        return new self();
+    }
+
+    /** @noinspection UnknownInspectionInspection */
+    public static function syncRequest(string $requested_by = null): void
+    {
+        if (!$requested_by) {
+            return;
+        }
+        /** @var SummaryModel $summary */
+        $summaryQuery = self::getWhere("requested_by = '$requested_by'");
+
+        if (count($summaryQuery->items)) {
+            $summary = $summaryQuery->items[0];
+        } else {
+            $summary = self::create([
+                'requested_by' => $requested_by,
+                'ordered_on' => (new \DateTime())->format('Y-m-d H:i:s'),
+            ]);
+        }
+
+        $requestsIDs = RequestModel::getWhere("requested_by = '$requested_by'")->getIDs();
+
+        $requestItems = RequestItemModel::getWhere('request_id IN (' . implode(',', $requestsIDs) . ')')->items;
+
+        if (!count($requestItems)) {
+            self::delete($summary->id);
+            return;
+        }
+
+        $itemsIDs = [];
+        foreach ($requestItems as $requestItem) {
+            /** @var RequestItemModel $requestItem */
+            $itemsIDs[] = $requestItem->item_id;
+        }
+
+        $items = ItemModel::getWhere('id in (' . implode(',', $itemsIDs) . ')');
+        $itemTypesAux = [];
+        foreach ($items->items as $item) {
+            /** @var ItemModel $item */
+            $itemTypesAux[$item->item_type_id][] = $item->id;
+        }
+
+        /** @noinspection PhpIncompatibleReturnTypeInspection */
+        self::update([
+            'id' => $summary->id,
+            'requested_by' => $summary->requested_by,
+            'ordered_on' => $summary->ordered_on,
+            'items' => json_encode($itemTypesAux, JSON_THROW_ON_ERROR)
+        ]);
+    }
+
+    public function toArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'requested_by' => $this->requested_by,
+            'ordered_on' => $this->ordered_on,
+            'items' => $this->items(),
+        ];
+    }
+
+    public function items(): array
+    {
+        if (!$this->items) {
+            return [];
+        }
+        $items = json_decode($this->items, false, 512, JSON_THROW_ON_ERROR);
+        $return = [];
+        foreach ($items as $itemTypeId => $itemsIds) {
+            $return[] = [
+                'item_type' => ItemType::getWhere('id = ' . $itemTypeId)->items[0]->toArray(),
+                'items' => ItemModel::getWhere('id in (' . implode(',', $itemsIds) . ')')->toArray(),
+            ];
+        }
+
+        return $return;
     }
 }
 
@@ -351,7 +536,7 @@ class RequestHandler
         $this->mapping = $mapping;
     }
 
-    public function handle()
+    public function handle(): bool
     {
         $response = new Response();
 
@@ -378,7 +563,12 @@ class RequestHandler
                     return $response->renderSuccess($model->toArray());
                 }
             } else {
-                $models = $modelClass::getAll();
+                $conditions = [];
+                foreach ($this->getBodyClean() as $k => $v) {
+                    $conditions[] = " $k = '$v'";
+                }
+
+                $models = $modelClass::getAll(implode(' AND', $conditions));
                 return $response->renderSuccess($models->toArray());
             }
         } elseif ($this->isPost()) {
@@ -388,7 +578,6 @@ class RequestHandler
         } elseif ($this->isPut()) {
             $body = $this->getBody();
             $model = $modelClass::update($body);
-//            dd($model);
             return $response->renderSuccess($model->toArray());
         } elseif ($this->isDelete()) {
             $id = $this->getBodyValue('id');
@@ -397,6 +586,7 @@ class RequestHandler
                 return $response->renderSuccess(['message' => 'ok']);
             }
         }
+        return false;
     }
 
     public function getRoute(): string
@@ -412,6 +602,7 @@ class RequestHandler
     /**
      * @param $key
      * @return int|string|null
+     * @throws JsonException
      */
     public function getBodyValue($key)
     {
@@ -424,16 +615,22 @@ class RequestHandler
     {
         switch ($this->method) {
             case 'GET':
+            case 'DELETE':
                 return $_GET;
             case 'POST':
             case 'PUT':
-                // Parse data from json content request
-                parse_str(file_get_contents('php://input'), $data);
-                return json_decode(array_keys($data)[0], true, 512, JSON_THROW_ON_ERROR);
-            case 'DELETE':
+                $inputJSON = file_get_contents('php://input');
+                return json_decode($inputJSON, true, 512, JSON_THROW_ON_ERROR);
             default:
                 return [];
         }
+    }
+
+    public function getBodyClean(): ?array
+    {
+        $array = $this->getBody();
+        unset($array['_route'], $array['_']);
+        return $array;
     }
 
     public function isPost(): bool
@@ -519,16 +716,7 @@ class Database
 
     public static function getClient(): self
     {
-        /**
-         * Should be passed in environment variables
-         * This method only exists to speed up development
-         */
-        $db_host = 'localhost';
-        $db_user = 'root';
-        $db_pw = 'mysql';
-        $db_port = 3306;
-        $db_name = 'db_cisco';
-        return new Database($db_host, $db_port, $db_user, $db_pw, $db_name);
+        return new Database(DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME);
     }
 
     /**
@@ -590,6 +778,7 @@ class Database
         if ($conditions) {
             $where = " WHERE $conditions";
         }
+
         $sel = $this->pdo->query("SELECT * FROM $table $where");
         $sel->setFetchMode(PDO::FETCH_ASSOC);
         return $sel;
@@ -619,6 +808,7 @@ class Database
             $mark[] = $keys;
         }
         $im = implode(', ', $mark);
+
         $ins = $this->pdo->prepare("INSERT INTO $table ($col) values ($im)");
 
         $ins->execute($data);
@@ -686,10 +876,10 @@ try {
         'items' => ItemModel::class,
         'item_types' => ItemModel::class,
         'request_items' => RequestItemModel::class,
+        'summary' => SummaryModel::class,
     ]);
 
     $requestHandler->handle();
-//    throw new InvalidRequest($requestHandler);
 } catch (ModelNotFound $e) {
     $requestHandler = new RequestHandler();
     /** @noinspection PhpUnhandledExceptionInspection
@@ -698,10 +888,7 @@ try {
     (new Response())->renderError($e->getMessage(), 404, [
         'route' => $requestHandler->getRoute(),
         'id' => $requestHandler->getBodyValue('id'),
-        'e' => [
-            $e->id,
-            $e->id,
-        ]
+        'dump' => $e
     ]);
 } catch (InvalidRequest $e) {
     (new Response())->renderError($e->getMessage(), 404, [
@@ -717,8 +904,9 @@ try {
     (new Response())->renderError('Database server error', 500, [
         'route' => $requestHandler->getRoute(),
         'error' => $e->getMessage(),
+        'dump' => $e
     ]);
-    dd($e);
+//    dd($e);
 } catch (Exception $e) {
     $requestHandler = new RequestHandler();
     /** @noinspection PhpUnhandledExceptionInspection
@@ -726,5 +914,7 @@ try {
      */
     (new Response())->renderError("Internal server error: {$e->getMessage()}", 500, [
         "route" => $requestHandler->getRoute(),
+        'dump' => $e
     ]);
+//    dd($e);
 }
